@@ -120,7 +120,7 @@ export default function Home() {
       {/* Sticky header */}
       <div style={{ position: "sticky", top: 0, background: "#0d1117", borderBottom: "1px solid #1a2030", padding: "0 16px", height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 100 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: "#00e5a0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>✂️</div>
+          <img src="/logo.png" alt="QueueCut Logo" style={{ width: 38, height: 38, objectFit: "contain" }} />
           <span style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 18, letterSpacing: -0.5 }}>Queue<span style={{ color: "#00e5a0" }}>Cut</span></span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
