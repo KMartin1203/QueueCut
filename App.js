@@ -1,10 +1,10 @@
 import { useState } from "react";
 import Home from "./components/Home";
 import PopularTimes from "./components/PopularTimes";
-
+ 
 export default function App() {
   const [page, setPage] = useState("home");
-
+ 
   return (
     <div>
       {/* Global Nav */}
@@ -30,7 +30,7 @@ export default function App() {
           </button>
         ))}
       </div>
-
+ 
       {/* Pages */}
       <div style={{ paddingBottom: 80 }}>
         {page === "home" && <Home />}
@@ -39,3 +39,4 @@ export default function App() {
     </div>
   );
 }
+ 
