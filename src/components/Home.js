@@ -12,7 +12,11 @@ const categoryTypes = {
   Government: ["local_government_office", "post_office", "city_hall", "courthouse", "embassy"],
   Retail: ["store", "shopping_mall", "clothing_store", "electronics_store", "department_store"],
   Healthcare: ["hospital", "doctor", "dentist", "physiotherapist", "medical_lab"],
-  Grocery: ["grocery_or_supermarket", "supermarket", "food_store"],
+};
+
+// Categories that work better with text search than type-based search
+const categoryTextQueries = {
+  Grocery: "grocery store supermarket near me",
 };
 
 const waitColor = (wait) => {
@@ -271,19 +275,38 @@ export default function Home() {
       await loadGoogleScript();
       const { Place } = await window.google.maps.importLibrary("places");
 
+      // Use text search for categories that don't map well to Google's type system
+      if (categoryTextQueries[category]) {
+        const { places } = await Place.searchByText({
+          textQuery: categoryTextQueries[category],
+          fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
+                   "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
+          maxResultCount: 20,
+          locationBias: { center: { lat, lng }, radius: 2000 },
+        });
+        if (places && places.length > 0) {
+          // Force category to Grocery since we searched specifically for it
+          setLocations(places.map((p, i) => ({ ...mapPlace(p, lat, lng, i), category: "Grocery" })));
+        } else {
+          setLocationError("No grocery stores found nearby.");
+          setLocations([]);
+        }
+        setLoading(false);
+        return;
+      }
+
       const includedTypes = category === "All"
         ? ["restaurant", "cafe", "store", "hospital", "local_government_office", "grocery_or_supermarket"]
         : categoryTypes[category] || ["establishment"];
 
-      const request = {
+      const { places } = await Place.searchNearby({
         fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
                  "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
         locationRestriction: { center: { lat, lng }, radius: 1500 },
         includedTypes,
         maxResultCount: 20,
-      };
+      });
 
-      const { places } = await Place.searchNearby(request);
       if (places && places.length > 0) {
         setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
       } else {
@@ -305,7 +328,7 @@ export default function Home() {
       await loadGoogleScript();
       const { Place } = await window.google.maps.importLibrary("places");
 
-      const request = {
+      const { places } = await Place.searchByText({
         textQuery: query,
         fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
                  "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
@@ -313,9 +336,8 @@ export default function Home() {
         ...(userLocation && {
           locationBias: { center: userLocation, radius: 10000 },
         }),
-      };
+      });
 
-      const { places } = await Place.searchByText(request);
       if (places && places.length > 0) {
         const lat = userLocation?.lat || 0;
         const lng = userLocation?.lng || 0;
