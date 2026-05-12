@@ -8,7 +8,7 @@ Real-time wait times powered by your community.
 ```bash
 npm install
 ```
-
+ 
 ### 2. Run locally
 ```bash
 npm start
