@@ -2,13 +2,13 @@ import { useState } from "react";
 import Home from "./components/Home";
 import PopularTimes from "./components/PopularTimes";
 import DriverReports from "./components/DriverReports";
+import Pro from "./components/Pro";
 
 export default function App() {
   const [page, setPage] = useState("home");
 
   return (
     <div>
-      {/* Global Nav */}
       <div style={{
         position: "fixed", bottom: 0, left: 0, right: 0,
         background: "#0d1117", borderTop: "1px solid #1a2030",
@@ -17,11 +17,12 @@ export default function App() {
         {[
           { id: "home", label: "Live", icon: "⏱" },
           { id: "drivers", label: "Drivers", icon: "🛵" },
+          { id: "pro", label: "Pro", icon: "⚡" },
           { id: "data", label: "Data", icon: "📊" },
         ].map(tab => (
           <button key={tab.id} onClick={() => setPage(tab.id)} style={{
             flex: 1, background: "transparent", border: "none",
-            color: page === tab.id ? "#00e5a0" : "#555",
+            color: tab.id === "pro" ? (page === tab.id ? "#f5c842" : "#555") : (page === tab.id ? "#00e5a0" : "#555"),
             display: "flex", flexDirection: "column", alignItems: "center",
             gap: 4, cursor: "pointer", fontSize: 18, padding: "6px 0"
           }}>
@@ -32,11 +33,10 @@ export default function App() {
           </button>
         ))}
       </div>
-
-      {/* Pages */}
       <div style={{ paddingBottom: 80 }}>
         {page === "home" && <Home />}
         {page === "drivers" && <DriverReports />}
+        {page === "pro" && <Pro />}
         {page === "data" && <PopularTimes />}
       </div>
     </div>
