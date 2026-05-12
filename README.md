@@ -1,5 +1,5 @@
 # ✂️ QueueCut
-
+ 
 Real-time wait times powered by your community.
 
 ## 🚀 Getting Started
