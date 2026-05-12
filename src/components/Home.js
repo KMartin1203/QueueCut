@@ -14,7 +14,6 @@ const categoryTypes = {
   Healthcare: ["hospital", "doctor", "dentist", "physiotherapist", "medical_lab"],
   Grocery: ["grocery_or_supermarket", "supermarket", "food_store"],
 };
-};
 
 const waitColor = (wait) => {
   if (wait <= 10) return { bar: "#00e5a0", text: "#00e5a0" };
