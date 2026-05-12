@@ -11,8 +11,9 @@ const categoryTypes = {
   Food: ["restaurant", "cafe", "bar", "bakery", "meal_takeaway", "fast_food_restaurant"],
   Government: ["local_government_office", "post_office", "city_hall", "courthouse", "embassy"],
   Retail: ["store", "shopping_mall", "clothing_store", "electronics_store", "department_store"],
-  Healthcare: ["hospital", "pharmacy", "doctor", "drugstore", "dentist", "medical_lab"],
-  Grocery: ["grocery_or_supermarket", "supermarket", "convenience_store"],
+  Healthcare: ["hospital", "doctor", "dentist", "physiotherapist", "medical_lab"],
+  Grocery: ["grocery_or_supermarket", "supermarket", "food_store"],
+};
 };
 
 const waitColor = (wait) => {
