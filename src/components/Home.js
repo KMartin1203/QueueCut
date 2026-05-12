@@ -134,7 +134,7 @@ export default function Home() {
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <div style={{ display: "inline-block", background: "#00e5a015", border: "1px solid #00e5a030", borderRadius: 99, padding: "3px 12px", fontSize: 11, color: "#00e5a0", marginBottom: 12 }}>📍 New York City · 6 locations</div>
           <h1 style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 28, lineHeight: 1.2, letterSpacing: -0.5, margin: 0 }}>
-            Skip the wait.<br /><span style={{ color: "#00e5a0" }}>Cut the queue.</span>
+            Check the line.<br /><span style={{ color: "#00e5a0" }}>Save the time.</span>
           </h1>
         </div>
 
