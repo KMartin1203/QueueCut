@@ -7,6 +7,14 @@ const iconMap = {
   Retail: "🛍️", Government: "🏛️", Other: "📍",
 };
 
+const categoryTypes = {
+  Food: ["restaurant", "cafe", "bar", "bakery", "meal_takeaway", "fast_food_restaurant"],
+  Government: ["local_government_office", "post_office", "city_hall", "courthouse", "embassy"],
+  Retail: ["store", "shopping_mall", "clothing_store", "electronics_store", "department_store"],
+  Healthcare: ["hospital", "pharmacy", "doctor", "drugstore", "dentist", "medical_lab"],
+  Grocery: ["grocery_or_supermarket", "supermarket", "convenience_store"],
+};
+
 const waitColor = (wait) => {
   if (wait <= 10) return { bar: "#00e5a0", text: "#00e5a0" };
   if (wait <= 30) return { bar: "#f5c842", text: "#f5c842" };
@@ -31,11 +39,11 @@ const estimateWait = (rating, totalRatings, priceLevel) => {
 const getCategory = (types = []) => {
   const map = {
     restaurant: "Food", cafe: "Food", bar: "Food", bakery: "Food",
-    meal_takeaway: "Food", meal_delivery: "Food", food: "Food",
-    grocery_or_supermarket: "Grocery", supermarket: "Grocery",
-    hospital: "Healthcare", pharmacy: "Healthcare", doctor: "Healthcare", drugstore: "Healthcare",
-    store: "Retail", shopping_mall: "Retail", clothing_store: "Retail", electronics_store: "Retail",
-    local_government_office: "Government", post_office: "Government", city_hall: "Government",
+    meal_takeaway: "Food", meal_delivery: "Food", food: "Food", fast_food_restaurant: "Food",
+    grocery_or_supermarket: "Grocery", supermarket: "Grocery", convenience_store: "Grocery",
+    hospital: "Healthcare", pharmacy: "Healthcare", doctor: "Healthcare", drugstore: "Healthcare", dentist: "Healthcare", medical_lab: "Healthcare",
+    store: "Retail", shopping_mall: "Retail", clothing_store: "Retail", electronics_store: "Retail", department_store: "Retail",
+    local_government_office: "Government", post_office: "Government", city_hall: "Government", courthouse: "Government", embassy: "Government",
   };
   for (const t of types) if (map[t]) return map[t];
   return "Other";
@@ -214,7 +222,6 @@ export default function Home() {
     return new Promise((resolve) => {
       if (window.google && window.google.maps) { resolve(); return; }
       const script = document.createElement("script");
-      // Use the new Places API (v=beta required for Place class)
       script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_API_KEY}&libraries=places&v=beta`;
       script.async = true;
       script.onload = resolve;
@@ -222,7 +229,6 @@ export default function Home() {
     });
   }, []);
 
-  // Helper to map a Place result to our location format
   const mapPlace = useCallback((place, lat, lng, index) => {
     const trends = ["up", "down", "stable"];
     const types = place.types || [];
@@ -258,23 +264,22 @@ export default function Home() {
     };
   }, []);
 
-  // Fetch nearby places using the new Place.searchNearby
-  const fetchNearbyPlaces = useCallback(async (lat, lng) => {
+  const fetchNearbyPlaces = useCallback(async (lat, lng, category = "All") => {
     setLoading(true);
     setLocationError(null);
     try {
       await loadGoogleScript();
       const { Place } = await window.google.maps.importLibrary("places");
 
+      const includedTypes = category === "All"
+        ? ["restaurant", "cafe", "store", "hospital", "local_government_office", "grocery_or_supermarket"]
+        : categoryTypes[category] || ["establishment"];
+
       const request = {
         fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
                  "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
-        locationRestriction: {
-          center: { lat, lng },
-          radius: 1500,
-        },
-        includedTypes: ["restaurant", "cafe", "store", "hospital",
-                        "local_government_office", "grocery_or_supermarket"],
+        locationRestriction: { center: { lat, lng }, radius: 1500 },
+        includedTypes,
         maxResultCount: 20,
       };
 
@@ -282,7 +287,8 @@ export default function Home() {
       if (places && places.length > 0) {
         setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
       } else {
-        setLocationError("No places found nearby. Try moving to a different area.");
+        setLocationError(`No ${category === "All" ? "places" : category + " places"} found nearby.`);
+        setLocations([]);
       }
     } catch (err) {
       console.error("fetchNearbyPlaces error:", err);
@@ -291,7 +297,6 @@ export default function Home() {
     setLoading(false);
   }, [loadGoogleScript, mapPlace]);
 
-  // Search places by name using the new Place.searchByText
   const searchPlacesByName = useCallback(async (query) => {
     if (!query.trim()) return;
     setLoading(true);
@@ -305,12 +310,8 @@ export default function Home() {
         fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
                  "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
         maxResultCount: 20,
-        // Bias toward user location if available
         ...(userLocation && {
-          locationBias: {
-            center: userLocation,
-            radius: 10000,
-          },
+          locationBias: { center: userLocation, radius: 10000 },
         }),
       };
 
@@ -330,6 +331,14 @@ export default function Home() {
     setLoading(false);
   }, [loadGoogleScript, mapPlace, userLocation]);
 
+  const handleCategoryChange = useCallback((cat) => {
+    setActiveCategory(cat);
+    setSearch("");
+    if (userLocation) {
+      fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
+    }
+  }, [userLocation, fetchNearbyPlaces]);
+
   useEffect(() => {
     if (!navigator.geolocation) {
       setLocationError("Location not supported on this device.");
@@ -340,7 +349,7 @@ export default function Home() {
       pos => {
         const { latitude: lat, longitude: lng } = pos.coords;
         setUserLocation({ lat, lng });
-        fetchNearbyPlaces(lat, lng);
+        fetchNearbyPlaces(lat, lng, "All");
       },
       () => {
         setLocationError("Location access denied. Please enable location to see nearby places.");
@@ -349,12 +358,10 @@ export default function Home() {
     );
   }, [fetchNearbyPlaces]);
 
-  // Debounced search — fires 600ms after user stops typing
   useEffect(() => {
     if (!search.trim()) {
-      // If search cleared and we have location, reload nearby
       if (userLocation && locations.length === 0) {
-        fetchNearbyPlaces(userLocation.lat, userLocation.lng);
+        fetchNearbyPlaces(userLocation.lat, userLocation.lng, activeCategory);
       }
       return;
     }
@@ -363,10 +370,6 @@ export default function Home() {
     }, 600);
     return () => clearTimeout(timer);
   }, [search]); // eslint-disable-line
-
-  const filtered = locations.filter(
-    l => activeCategory === "All" || l.category === activeCategory
-  );
 
   const handleSubmit = (range) => {
     const minuteMap = { "Under 5 min":3, "5–15 min":10, "15–30 min":22, "30–60 min":45, "60+ min":70 };
@@ -433,7 +436,7 @@ export default function Home() {
           />
           {search.length > 0 && (
             <button
-              onClick={() => { setSearch(""); if (userLocation) fetchNearbyPlaces(userLocation.lat, userLocation.lng); }}
+              onClick={() => { setSearch(""); if (userLocation) fetchNearbyPlaces(userLocation.lat, userLocation.lng, activeCategory); }}
               style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#555", cursor:"pointer", fontSize:16 }}
             >✕</button>
           )}
@@ -441,7 +444,7 @@ export default function Home() {
 
         <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:16, paddingBottom:4 }}>
           {categories.map(cat => (
-            <button key={cat} onClick={() => setActiveCategory(cat)} style={{ background:activeCategory===cat?"#00e5a0":"#161b26", border:activeCategory===cat?"none":"1px solid #1e2535", borderRadius:99, padding:"6px 14px", color:activeCategory===cat?"#0d1117":"#888", fontWeight:activeCategory===cat?700:400, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{cat}</button>
+            <button key={cat} onClick={() => handleCategoryChange(cat)} style={{ background:activeCategory===cat?"#00e5a0":"#161b26", border:activeCategory===cat?"none":"1px solid #1e2535", borderRadius:99, padding:"6px 14px", color:activeCategory===cat?"#0d1117":"#888", fontWeight:activeCategory===cat?700:400, fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>{cat}</button>
           ))}
         </div>
 
@@ -449,7 +452,7 @@ export default function Home() {
           <div style={{ textAlign:"center", padding:"48px 0" }}>
             <div style={{ fontSize:36, marginBottom:12 }}>📍</div>
             <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:16, color:"#fff", marginBottom:6 }}>
-              {search ? `Searching for "${search}"...` : "Finding places near you..."}
+              {search ? `Searching for "${search}"...` : activeCategory !== "All" ? `Finding ${activeCategory} near you...` : "Finding places near you..."}
             </div>
             <div style={{ fontSize:13, color:"#555" }}>
               {search ? "Looking up locations" : "Allow location access when prompted"}
@@ -464,7 +467,7 @@ export default function Home() {
               {search ? "No Results" : "Location Required"}
             </div>
             <div style={{ fontSize:13, color:"#666", marginBottom:16 }}>{locationError}</div>
-            <button onClick={() => search ? searchPlacesByName(search) : window.location.reload()} style={{ background:"#00e5a0", border:"none", borderRadius:10, padding:"10px 20px", color:"#0d1117", fontWeight:700, fontSize:13, cursor:"pointer" }}>Try Again</button>
+            <button onClick={() => search ? searchPlacesByName(search) : fetchNearbyPlaces(userLocation?.lat, userLocation?.lng, activeCategory)} style={{ background:"#00e5a0", border:"none", borderRadius:10, padding:"10px 20px", color:"#0d1117", fontWeight:700, fontSize:13, cursor:"pointer" }}>Try Again</button>
           </div>
         )}
 
@@ -476,7 +479,7 @@ export default function Home() {
         )}
 
         <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          {filtered.map(loc => (
+          {locations.map(loc => (
             <LocationCard key={loc.id} loc={loc} onReport={e => setReportTarget(e)} onTap={loc => setWaitTypeTarget(loc)} />
           ))}
         </div>
