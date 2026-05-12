@@ -57,7 +57,7 @@ queuecut/
 ---
 
 ## 💰 Revenue Model
-
+ 
 - **QueueCut Pro** – $4.99/mo (push alerts, history trends)
 - **Business Listings** – $49–199/mo (verified wait times, dashboard)
 - **Sponsored Placement** – pay to appear first in results
