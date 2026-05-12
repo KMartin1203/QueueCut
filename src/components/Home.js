@@ -362,7 +362,7 @@ export default function Home() {
       searchPlacesByName(search);
     }, 600);
     return () => clearTimeout(timer);
-  }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [search]); // eslint-disable-line
 
   const filtered = locations.filter(
     l => activeCategory === "All" || l.category === activeCategory
