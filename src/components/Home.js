@@ -14,7 +14,6 @@ const categoryTypes = {
   Healthcare: ["hospital", "doctor", "dentist", "physiotherapist", "medical_lab"],
 };
 
-// Categories that work better with text search than type-based search
 const categoryTextQueries = {
   Grocery: "grocery store supermarket near me",
 };
@@ -480,10 +479,10 @@ export default function Home() {
           </div>
         )}
 
-        {locationError && !loading && (
+        {/* Only show error when not loading AND no locations are showing */}
+        {locationError && !loading && locations.length === 0 && (
           <div style={{ background:"#1e1a14", border:"1px solid #ff5c5c33", borderRadius:16, padding:"20px", textAlign:"center", marginBottom:20 }}>
             <div style={{ fontSize:32, marginBottom:10 }}>📍</div>
-            {/* ── FIXED: only show "Location Required" if location was actually denied ── */}
             <div style={{ fontSize:14, color:"#ff5c5c", fontWeight:600, marginBottom:6 }}>
               {search ? "No Results" : locationError.includes("denied") ? "Location Required" : "No Places Found"}
             </div>
