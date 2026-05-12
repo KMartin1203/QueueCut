@@ -275,7 +275,6 @@ export default function Home() {
       await loadGoogleScript();
       const { Place } = await window.google.maps.importLibrary("places");
 
-      // Use text search for categories that don't map well to Google's type system
       if (categoryTextQueries[category]) {
         const { places } = await Place.searchByText({
           textQuery: categoryTextQueries[category],
@@ -285,7 +284,6 @@ export default function Home() {
           locationBias: { center: { lat, lng }, radius: 2000 },
         });
         if (places && places.length > 0) {
-          // Force category to Grocery since we searched specifically for it
           setLocations(places.map((p, i) => ({ ...mapPlace(p, lat, lng, i), category: "Grocery" })));
         } else {
           setLocationError("No grocery stores found nearby.");
@@ -485,8 +483,9 @@ export default function Home() {
         {locationError && !loading && (
           <div style={{ background:"#1e1a14", border:"1px solid #ff5c5c33", borderRadius:16, padding:"20px", textAlign:"center", marginBottom:20 }}>
             <div style={{ fontSize:32, marginBottom:10 }}>📍</div>
+            {/* ── FIXED: only show "Location Required" if location was actually denied ── */}
             <div style={{ fontSize:14, color:"#ff5c5c", fontWeight:600, marginBottom:6 }}>
-              {search ? "No Results" : "Location Required"}
+              {search ? "No Results" : locationError.includes("denied") ? "Location Required" : "No Places Found"}
             </div>
             <div style={{ fontSize:13, color:"#666", marginBottom:16 }}>{locationError}</div>
             <button onClick={() => search ? searchPlacesByName(search) : fetchNearbyPlaces(userLocation?.lat, userLocation?.lng, activeCategory)} style={{ background:"#00e5a0", border:"none", borderRadius:10, padding:"10px 20px", color:"#0d1117", fontWeight:700, fontSize:13, cursor:"pointer" }}>Try Again</button>
