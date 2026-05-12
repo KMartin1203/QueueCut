@@ -214,60 +214,121 @@ export default function Home() {
     return new Promise((resolve) => {
       if (window.google && window.google.maps) { resolve(); return; }
       const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_API_KEY}&libraries=places`;
+      // Use the new Places API (v=beta required for Place class)
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_API_KEY}&libraries=places&v=beta`;
       script.async = true;
       script.onload = resolve;
       document.head.appendChild(script);
     });
   }, []);
 
+  // Helper to map a Place result to our location format
+  const mapPlace = useCallback((place, lat, lng, index) => {
+    const trends = ["up", "down", "stable"];
+    const types = place.types || [];
+    const category = getCategory(types);
+    const rating = place.rating || 3.5;
+    const totalRatings = place.userRatingCount || 100;
+    const priceLevel = place.priceLevel || 1;
+    const wait = estimateWait(rating, totalRatings, priceLevel);
+
+    let distMiles = "?";
+    if (place.location) {
+      const placeLat = place.location.lat();
+      const placeLng = place.location.lng();
+      const distMeters = Math.sqrt(
+        Math.pow((placeLat - lat) * 111000, 2) +
+        Math.pow((placeLng - lng) * 111000, 2)
+      );
+      distMiles = (distMeters / 1609).toFixed(1);
+    }
+
+    return {
+      id: place.id,
+      name: place.displayName || "Unknown",
+      category,
+      address: place.formattedAddress || place.vicinity || "",
+      distance: `${distMiles} mi away`,
+      wait,
+      popularity: Math.min(Math.round((wait / 75) * 100), 100),
+      trend: trends[index % 3],
+      rating: place.rating,
+      openNow: place.regularOpeningHours?.isOpen?.() || place.businessStatus === "OPERATIONAL" || false,
+      reports: Math.floor(Math.random() * 30) + 1,
+    };
+  }, []);
+
+  // Fetch nearby places using the new Place.searchNearby
   const fetchNearbyPlaces = useCallback(async (lat, lng) => {
     setLoading(true);
+    setLocationError(null);
     try {
       await loadGoogleScript();
-      const service = new window.google.maps.places.PlacesService(document.createElement("div"));
+      const { Place } = await window.google.maps.importLibrary("places");
+
       const request = {
-        location: new window.google.maps.LatLng(lat, lng),
-        radius: 1500,
-        type: ["restaurant", "cafe", "store", "hospital", "local_government_office", "grocery_or_supermarket"],
+        fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
+                 "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
+        locationRestriction: {
+          center: { lat, lng },
+          radius: 1500,
+        },
+        includedTypes: ["restaurant", "cafe", "store", "hospital",
+                        "local_government_office", "grocery_or_supermarket"],
+        maxResultCount: 20,
       };
 
-      service.nearbySearch(request, (results, status) => {
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
-          const trends = ["up", "down", "stable"];
-          const mapped = results.slice(0, 20).map((p, i) => {
-            const category = getCategory(p.types);
-            const wait = estimateWait(p.rating || 3.5, p.user_ratings_total || 100, p.price_level || 1);
-            const distMeters = Math.sqrt(
-              Math.pow((p.geometry.location.lat() - lat) * 111000, 2) +
-              Math.pow((p.geometry.location.lng() - lng) * 111000, 2)
-            );
-            const distMiles = (distMeters / 1609).toFixed(1);
-            return {
-              id: p.place_id,
-              name: p.name,
-              category,
-              address: p.vicinity,
-              distance: `${distMiles} mi away`,
-              wait,
-              popularity: Math.min(Math.round((wait / 75) * 100), 100),
-              trend: trends[i % 3],
-              rating: p.rating,
-              openNow: p.opening_hours?.isOpen?.() || false,
-              reports: Math.floor(Math.random() * 30) + 1,
-            };
-          });
-          setLocations(mapped);
-        } else {
-          setLocationError("Couldn't load nearby places. Please try again.");
-        }
-        setLoading(false);
-      });
+      const { places } = await Place.searchNearby(request);
+      if (places && places.length > 0) {
+        setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
+      } else {
+        setLocationError("No places found nearby. Try moving to a different area.");
+      }
     } catch (err) {
-      setLocationError("Something went wrong loading places.");
-      setLoading(false);
+      console.error("fetchNearbyPlaces error:", err);
+      setLocationError("Couldn't load nearby places. Please try again.");
     }
-  }, [loadGoogleScript]);
+    setLoading(false);
+  }, [loadGoogleScript, mapPlace]);
+
+  // Search places by name using the new Place.searchByText
+  const searchPlacesByName = useCallback(async (query) => {
+    if (!query.trim()) return;
+    setLoading(true);
+    setLocationError(null);
+    try {
+      await loadGoogleScript();
+      const { Place } = await window.google.maps.importLibrary("places");
+
+      const request = {
+        textQuery: query,
+        fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
+                 "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
+        maxResultCount: 20,
+        // Bias toward user location if available
+        ...(userLocation && {
+          locationBias: {
+            center: userLocation,
+            radius: 10000,
+          },
+        }),
+      };
+
+      const { places } = await Place.searchByText(request);
+      if (places && places.length > 0) {
+        const lat = userLocation?.lat || 0;
+        const lng = userLocation?.lng || 0;
+        setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
+      } else {
+        setLocationError(`No results found for "${query}".`);
+        setLocations([]);
+      }
+    } catch (err) {
+      console.error("searchPlacesByName error:", err);
+      setLocationError("Search failed. Please try again.");
+    }
+    setLoading(false);
+  }, [loadGoogleScript, mapPlace, userLocation]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -277,8 +338,9 @@ export default function Home() {
     }
     navigator.geolocation.getCurrentPosition(
       pos => {
-        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        fetchNearbyPlaces(pos.coords.latitude, pos.coords.longitude);
+        const { latitude: lat, longitude: lng } = pos.coords;
+        setUserLocation({ lat, lng });
+        fetchNearbyPlaces(lat, lng);
       },
       () => {
         setLocationError("Location access denied. Please enable location to see nearby places.");
@@ -287,9 +349,24 @@ export default function Home() {
     );
   }, [fetchNearbyPlaces]);
 
-  const filtered = locations
-    .filter(l => activeCategory === "All" || l.category === activeCategory)
-    .filter(l => l.name.toLowerCase().includes(search.toLowerCase()));
+  // Debounced search — fires 600ms after user stops typing
+  useEffect(() => {
+    if (!search.trim()) {
+      // If search cleared and we have location, reload nearby
+      if (userLocation && locations.length === 0) {
+        fetchNearbyPlaces(userLocation.lat, userLocation.lng);
+      }
+      return;
+    }
+    const timer = setTimeout(() => {
+      searchPlacesByName(search);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered = locations.filter(
+    l => activeCategory === "All" || l.category === activeCategory
+  );
 
   const handleSubmit = (range) => {
     const minuteMap = { "Under 5 min":3, "5–15 min":10, "15–30 min":22, "30–60 min":45, "60+ min":70 };
@@ -348,7 +425,18 @@ export default function Home() {
 
         <div style={{ position:"relative", marginBottom:14 }}>
           <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", fontSize:14, color:"#555" }}>🔍</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search nearby locations..." style={{ width:"100%", background:"#161b26", border:"1px solid #1e2535", borderRadius:12, padding:"11px 14px 11px 34px", color:"#fff", fontSize:14, outline:"none" }} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search any location (e.g. McDonald's)..."
+            style={{ width:"100%", background:"#161b26", border:"1px solid #1e2535", borderRadius:12, padding:"11px 14px 11px 34px", color:"#fff", fontSize:14, outline:"none" }}
+          />
+          {search.length > 0 && (
+            <button
+              onClick={() => { setSearch(""); if (userLocation) fetchNearbyPlaces(userLocation.lat, userLocation.lng); }}
+              style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#555", cursor:"pointer", fontSize:16 }}
+            >✕</button>
+          )}
         </div>
 
         <div style={{ display:"flex", gap:8, overflowX:"auto", marginBottom:16, paddingBottom:4 }}>
@@ -360,17 +448,23 @@ export default function Home() {
         {loading && (
           <div style={{ textAlign:"center", padding:"48px 0" }}>
             <div style={{ fontSize:36, marginBottom:12 }}>📍</div>
-            <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:16, color:"#fff", marginBottom:6 }}>Finding places near you...</div>
-            <div style={{ fontSize:13, color:"#555" }}>Allow location access when prompted</div>
+            <div style={{ fontFamily:"'Syne',sans-serif", fontWeight:700, fontSize:16, color:"#fff", marginBottom:6 }}>
+              {search ? `Searching for "${search}"...` : "Finding places near you..."}
+            </div>
+            <div style={{ fontSize:13, color:"#555" }}>
+              {search ? "Looking up locations" : "Allow location access when prompted"}
+            </div>
           </div>
         )}
 
         {locationError && !loading && (
           <div style={{ background:"#1e1a14", border:"1px solid #ff5c5c33", borderRadius:16, padding:"20px", textAlign:"center", marginBottom:20 }}>
             <div style={{ fontSize:32, marginBottom:10 }}>📍</div>
-            <div style={{ fontSize:14, color:"#ff5c5c", fontWeight:600, marginBottom:6 }}>Location Required</div>
+            <div style={{ fontSize:14, color:"#ff5c5c", fontWeight:600, marginBottom:6 }}>
+              {search ? "No Results" : "Location Required"}
+            </div>
             <div style={{ fontSize:13, color:"#666", marginBottom:16 }}>{locationError}</div>
-            <button onClick={() => window.location.reload()} style={{ background:"#00e5a0", border:"none", borderRadius:10, padding:"10px 20px", color:"#0d1117", fontWeight:700, fontSize:13, cursor:"pointer" }}>Try Again</button>
+            <button onClick={() => search ? searchPlacesByName(search) : window.location.reload()} style={{ background:"#00e5a0", border:"none", borderRadius:10, padding:"10px 20px", color:"#0d1117", fontWeight:700, fontSize:13, cursor:"pointer" }}>Try Again</button>
           </div>
         )}
 
