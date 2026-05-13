@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 const categories = ["All", "Food", "Government", "Retail", "Healthcare", "Grocery"];
 
@@ -17,6 +17,9 @@ const categoryTypes = {
 const categoryTextQueries = {
   Grocery: "grocery store supermarket near me",
 };
+
+// Global fetch ID — lives outside the component so it's never stale
+let activeFetchId = 0;
 
 const waitColor = (wait) => {
   if (wait <= 10) return { bar: "#00e5a0", text: "#00e5a0" };
@@ -219,9 +222,6 @@ export default function Home() {
   const [waitTypeTarget, setWaitTypeTarget] = useState(null);
   const [toast, setToast] = useState(null);
 
-  // Track the current fetch so stale results from old fetches are ignored
-  const fetchIdRef = useRef(0);
-
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
   const loadGoogleScript = useCallback(() => {
@@ -271,8 +271,7 @@ export default function Home() {
   }, []);
 
   const fetchNearbyPlaces = useCallback(async (lat, lng, category = "All") => {
-    // Increment fetch ID — any previous fetch with a stale ID will be ignored
-    const currentFetchId = ++fetchIdRef.current;
+    const currentFetchId = ++activeFetchId;
     setLoading(true);
     setLocationError(null);
 
@@ -288,7 +287,7 @@ export default function Home() {
           maxResultCount: 20,
           locationBias: { center: { lat, lng }, radius: 2000 },
         });
-        if (fetchIdRef.current !== currentFetchId) return; // stale, discard
+        if (activeFetchId !== currentFetchId) return;
         if (places && places.length > 0) {
           setLocations(places.map((p, i) => ({ ...mapPlace(p, lat, lng, i), category: "Grocery" })));
         } else {
@@ -311,7 +310,7 @@ export default function Home() {
         maxResultCount: 20,
       });
 
-      if (fetchIdRef.current !== currentFetchId) return; // stale, discard
+      if (activeFetchId !== currentFetchId) return;
 
       if (places && places.length > 0) {
         setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
@@ -320,7 +319,7 @@ export default function Home() {
         setLocations([]);
       }
     } catch (err) {
-      if (fetchIdRef.current !== currentFetchId) return; // stale, discard
+      if (activeFetchId !== currentFetchId) return;
       console.error("fetchNearbyPlaces error:", err);
       setLocationError("Couldn't load nearby places. Please try again.");
     }
@@ -329,7 +328,7 @@ export default function Home() {
 
   const searchPlacesByName = useCallback(async (query) => {
     if (!query.trim()) return;
-    const currentFetchId = ++fetchIdRef.current;
+    const currentFetchId = ++activeFetchId;
     setLoading(true);
     setLocationError(null);
     try {
@@ -346,7 +345,7 @@ export default function Home() {
         }),
       });
 
-      if (fetchIdRef.current !== currentFetchId) return; // stale, discard
+      if (activeFetchId !== currentFetchId) return;
 
       if (places && places.length > 0) {
         const lat = userLocation?.lat || 0;
@@ -357,7 +356,7 @@ export default function Home() {
         setLocations([]);
       }
     } catch (err) {
-      if (fetchIdRef.current !== currentFetchId) return;
+      if (activeFetchId !== currentFetchId) return;
       console.error("searchPlacesByName error:", err);
       setLocationError("Search failed. Please try again.");
     }
@@ -365,13 +364,13 @@ export default function Home() {
   }, [loadGoogleScript, mapPlace, userLocation]);
 
   const handleCategoryChange = (cat) => {
-  setActiveCategory(cat);
-  setSearch("");
-  setLocations([]);
-  if (userLocation) {
-    fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
-  }
-};
+    setActiveCategory(cat);
+    setSearch("");
+    setLocations([]);
+    if (userLocation) {
+      fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
+    }
+  };
 
   useEffect(() => {
     if (!navigator.geolocation) {
