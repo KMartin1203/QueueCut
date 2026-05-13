@@ -15,6 +15,7 @@ const categoryTypes = {
 };
 
 const categoryTextQueries = {
+  All: "restaurants stores hospitals pharmacies near me",
   Grocery: "grocery store supermarket near me",
 };
 
