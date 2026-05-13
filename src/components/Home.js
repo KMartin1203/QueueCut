@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const categories = ["All", "Food", "Government", "Retail", "Healthcare", "Grocery"];
 
@@ -219,6 +219,9 @@ export default function Home() {
   const [waitTypeTarget, setWaitTypeTarget] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // Track the current fetch so stale results from old fetches are ignored
+  const fetchIdRef = useRef(0);
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
   const loadGoogleScript = useCallback(() => {
@@ -268,8 +271,11 @@ export default function Home() {
   }, []);
 
   const fetchNearbyPlaces = useCallback(async (lat, lng, category = "All") => {
+    // Increment fetch ID — any previous fetch with a stale ID will be ignored
+    const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
     setLocationError(null);
+
     try {
       await loadGoogleScript();
       const { Place } = await window.google.maps.importLibrary("places");
@@ -282,6 +288,7 @@ export default function Home() {
           maxResultCount: 20,
           locationBias: { center: { lat, lng }, radius: 2000 },
         });
+        if (fetchIdRef.current !== currentFetchId) return; // stale, discard
         if (places && places.length > 0) {
           setLocations(places.map((p, i) => ({ ...mapPlace(p, lat, lng, i), category: "Grocery" })));
         } else {
@@ -304,6 +311,8 @@ export default function Home() {
         maxResultCount: 20,
       });
 
+      if (fetchIdRef.current !== currentFetchId) return; // stale, discard
+
       if (places && places.length > 0) {
         setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
       } else {
@@ -311,6 +320,7 @@ export default function Home() {
         setLocations([]);
       }
     } catch (err) {
+      if (fetchIdRef.current !== currentFetchId) return; // stale, discard
       console.error("fetchNearbyPlaces error:", err);
       setLocationError("Couldn't load nearby places. Please try again.");
     }
@@ -319,6 +329,7 @@ export default function Home() {
 
   const searchPlacesByName = useCallback(async (query) => {
     if (!query.trim()) return;
+    const currentFetchId = ++fetchIdRef.current;
     setLoading(true);
     setLocationError(null);
     try {
@@ -335,6 +346,8 @@ export default function Home() {
         }),
       });
 
+      if (fetchIdRef.current !== currentFetchId) return; // stale, discard
+
       if (places && places.length > 0) {
         const lat = userLocation?.lat || 0;
         const lng = userLocation?.lng || 0;
@@ -344,6 +357,7 @@ export default function Home() {
         setLocations([]);
       }
     } catch (err) {
+      if (fetchIdRef.current !== currentFetchId) return;
       console.error("searchPlacesByName error:", err);
       setLocationError("Search failed. Please try again.");
     }
@@ -353,6 +367,7 @@ export default function Home() {
   const handleCategoryChange = useCallback((cat) => {
     setActiveCategory(cat);
     setSearch("");
+    setLocations([]);
     if (userLocation) {
       fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
     }
@@ -479,7 +494,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* Only show error when not loading AND no locations are showing */}
         {locationError && !loading && locations.length === 0 && (
           <div style={{ background:"#1e1a14", border:"1px solid #ff5c5c33", borderRadius:16, padding:"20px", textAlign:"center", marginBottom:20 }}>
             <div style={{ fontSize:32, marginBottom:10 }}>📍</div>
