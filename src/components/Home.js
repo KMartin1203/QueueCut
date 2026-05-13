@@ -7,67 +7,36 @@ const iconMap = {
   Retail: "🛍️", Government: "🏛️", Other: "📍",
 };
 
-const categoryTypes = {
-  Food: "restaurants cafes bars bakeries near me",
-  Government: ["local_government_office", "post_office", "city_hall", "courthouse", "embassy"],
-  Retail: ["store", "shopping_mall", "clothing_store", "electronics_store", "department_store"],
-  Healthcare: ["hospital", "doctor", "dentist", "physiotherapist", "medical_lab"],
-  Grocery: "grocery store supermarket near me", // text query
+// All categories use text search — most reliable approach with new Places API
+const categoryQueries = {
+  All: null, // All uses searchNearby with broad types
+  Food: "restaurants cafes fast food near me",
+  Government: "government office city hall post office near me",
+  Retail: "shops stores retail shopping near me",
+  Healthcare: "hospital clinic doctor pharmacy near me",
+  Grocery: "grocery store supermarket near me",
 };
 
 // Global fetch counter — never stale
 let activeFetchId = 0;
 
 // Load Google script once globally
-let googleScriptLoaded = false;
+let googleScriptLoading = false;
 const loadGoogleScript = (apiKey) => new Promise((resolve) => {
   if (window.google && window.google.maps) { resolve(); return; }
-  if (googleScriptLoaded) {
+  if (googleScriptLoading) {
     const interval = setInterval(() => {
       if (window.google && window.google.maps) { clearInterval(interval); resolve(); }
     }, 100);
     return;
   }
-  googleScriptLoaded = true;
+  googleScriptLoading = true;
   const script = document.createElement("script");
   script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=beta`;
   script.async = true;
   script.onload = resolve;
   document.head.appendChild(script);
 });
-
-const mapPlaceToLocation = (place, lat, lng, index, forcedCategory) => {
-  const trends = ["up", "down", "stable"];
-  const types = place.types || [];
-  const category = forcedCategory || getCategory(types);
-  const rating = place.rating || 3.5;
-  const totalRatings = place.userRatingCount || 100;
-  const priceLevel = place.priceLevel || 1;
-  const wait = estimateWait(rating, totalRatings, priceLevel);
-
-  let distMiles = "?";
-  if (place.location) {
-    const distMeters = Math.sqrt(
-      Math.pow((place.location.lat() - lat) * 111000, 2) +
-      Math.pow((place.location.lng() - lng) * 111000, 2)
-    );
-    distMiles = (distMeters / 1609).toFixed(1);
-  }
-
-  return {
-    id: place.id,
-    name: place.displayName || "Unknown",
-    category,
-    address: place.formattedAddress || place.vicinity || "",
-    distance: `${distMiles} mi away`,
-    wait,
-    popularity: Math.min(Math.round((wait / 75) * 100), 100),
-    trend: trends[index % 3],
-    rating: place.rating,
-    openNow: place.regularOpeningHours?.isOpen?.() || place.businessStatus === "OPERATIONAL" || false,
-    reports: Math.floor(Math.random() * 30) + 1,
-  };
-};
 
 const waitColor = (wait) => {
   if (wait <= 10) return { bar: "#00e5a0", text: "#00e5a0" };
@@ -101,6 +70,39 @@ const getCategory = (types = []) => {
   };
   for (const t of types) if (map[t]) return map[t];
   return "Other";
+};
+
+const mapPlaceToLocation = (place, lat, lng, index, forcedCategory) => {
+  const trends = ["up", "down", "stable"];
+  const types = place.types || [];
+  const category = forcedCategory || getCategory(types);
+  const rating = place.rating || 3.5;
+  const totalRatings = place.userRatingCount || 100;
+  const priceLevel = place.priceLevel || 1;
+  const wait = estimateWait(rating, totalRatings, priceLevel);
+
+  let distMiles = "?";
+  if (place.location) {
+    const distMeters = Math.sqrt(
+      Math.pow((place.location.lat() - lat) * 111000, 2) +
+      Math.pow((place.location.lng() - lng) * 111000, 2)
+    );
+    distMiles = (distMeters / 1609).toFixed(1);
+  }
+
+  return {
+    id: place.id,
+    name: place.displayName || "Unknown",
+    category,
+    address: place.formattedAddress || place.vicinity || "",
+    distance: `${distMiles} mi away`,
+    wait,
+    popularity: Math.min(Math.round((wait / 75) * 100), 100),
+    trend: trends[index % 3],
+    rating: place.rating,
+    openNow: place.regularOpeningHours?.isOpen?.() || place.businessStatus === "OPERATIONAL" || false,
+    reports: Math.floor(Math.random() * 30) + 1,
+  };
 };
 
 // ── Wait Type Modal ──
@@ -270,7 +272,6 @@ export default function Home() {
   const [waitTypeTarget, setWaitTypeTarget] = useState(null);
   const [toast, setToast] = useState(null);
 
-  // Store userLocation in a ref so fetch functions always have the latest value
   const userLocationRef = useRef(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
@@ -288,8 +289,18 @@ export default function Home() {
                       "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"];
 
       let places = [];
+      const query = categoryQueries[category];
 
-      if (category === "All") {
+      if (query) {
+        // Text search for all named categories
+        const result = await Place.searchByText({
+          textQuery: query,
+          fields,
+          maxResultCount: 20,
+          locationBias: { center: { lat, lng }, radius: 2000 },
+        });
+        places = result.places || [];
+      } else {
         // All: use searchNearby with broad types
         const result = await Place.searchNearby({
           fields,
@@ -298,30 +309,14 @@ export default function Home() {
           maxResultCount: 20,
         });
         places = result.places || [];
-      } else if (typeof categoryTypes[category] === "string") {
-        // Text query categories (Grocery)
-        const result = await Place.searchByText({
-          textQuery: categoryTypes[category],
-          fields,
-          maxResultCount: 20,
-          locationBias: { center: { lat, lng }, radius: 2000 },
-        });
-        places = (result.places || []).map(p => ({ ...p, _forcedCategory: category }));
-      } else {
-        // Type-based categories
-        const result = await Place.searchNearby({
-          fields,
-          locationRestriction: { center: { lat, lng }, radius: 1500 },
-          includedTypes: categoryTypes[category] || ["establishment"],
-          maxResultCount: 20,
-        });
-        places = result.places || [];
       }
 
       if (activeFetchId !== currentFetchId) return;
 
       if (places.length > 0) {
-        setLocations(places.map((p, i) => mapPlaceToLocation(p, lat, lng, i, p._forcedCategory || null)));
+        // For named categories, force the category label on all results
+        const forcedCat = category !== "All" ? category : null;
+        setLocations(places.map((p, i) => mapPlaceToLocation(p, lat, lng, i, forcedCat)));
       } else {
         setLocationError(`No ${category === "All" ? "places" : category + " places"} found nearby.`);
       }
@@ -371,7 +366,6 @@ export default function Home() {
     if (activeFetchId === currentFetchId) setLoading(false);
   };
 
-  // Get location on mount
   useEffect(() => {
     if (!navigator.geolocation) {
       setLocationError("Location not supported on this device.");
@@ -392,7 +386,6 @@ export default function Home() {
     );
   }, []); // eslint-disable-line
 
-  // Debounced search
   useEffect(() => {
     if (!search.trim()) return;
     const timer = setTimeout(() => doSearch(search), 600);
