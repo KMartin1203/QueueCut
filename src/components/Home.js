@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const categories = ["All", "Food", "Government", "Retail", "Healthcare", "Grocery"];
 
@@ -12,15 +12,62 @@ const categoryTypes = {
   Government: ["local_government_office", "post_office", "city_hall", "courthouse", "embassy"],
   Retail: ["store", "shopping_mall", "clothing_store", "electronics_store", "department_store"],
   Healthcare: ["hospital", "doctor", "dentist", "physiotherapist", "medical_lab"],
+  Grocery: "grocery store supermarket near me", // text query
 };
 
-const categoryTextQueries = {
-  All: "restaurants stores hospitals pharmacies near me",
-  Grocery: "grocery store supermarket near me",
-};
-
-// Global fetch ID — lives outside the component so it's never stale
+// Global fetch counter — never stale
 let activeFetchId = 0;
+
+// Load Google script once globally
+let googleScriptLoaded = false;
+const loadGoogleScript = (apiKey) => new Promise((resolve) => {
+  if (window.google && window.google.maps) { resolve(); return; }
+  if (googleScriptLoaded) {
+    const interval = setInterval(() => {
+      if (window.google && window.google.maps) { clearInterval(interval); resolve(); }
+    }, 100);
+    return;
+  }
+  googleScriptLoaded = true;
+  const script = document.createElement("script");
+  script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places&v=beta`;
+  script.async = true;
+  script.onload = resolve;
+  document.head.appendChild(script);
+});
+
+const mapPlaceToLocation = (place, lat, lng, index, forcedCategory) => {
+  const trends = ["up", "down", "stable"];
+  const types = place.types || [];
+  const category = forcedCategory || getCategory(types);
+  const rating = place.rating || 3.5;
+  const totalRatings = place.userRatingCount || 100;
+  const priceLevel = place.priceLevel || 1;
+  const wait = estimateWait(rating, totalRatings, priceLevel);
+
+  let distMiles = "?";
+  if (place.location) {
+    const distMeters = Math.sqrt(
+      Math.pow((place.location.lat() - lat) * 111000, 2) +
+      Math.pow((place.location.lng() - lng) * 111000, 2)
+    );
+    distMiles = (distMeters / 1609).toFixed(1);
+  }
+
+  return {
+    id: place.id,
+    name: place.displayName || "Unknown",
+    category,
+    address: place.formattedAddress || place.vicinity || "",
+    distance: `${distMiles} mi away`,
+    wait,
+    popularity: Math.min(Math.round((wait / 75) * 100), 100),
+    trend: trends[index % 3],
+    rating: place.rating,
+    openNow: place.regularOpeningHours?.isOpen?.() || place.businessStatus === "OPERATIONAL" || false,
+    reports: Math.floor(Math.random() * 30) + 1,
+  };
+};
 
 const waitColor = (wait) => {
   if (wait <= 10) return { bar: "#00e5a0", text: "#00e5a0" };
@@ -223,157 +270,108 @@ export default function Home() {
   const [waitTypeTarget, setWaitTypeTarget] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // Store userLocation in a ref so fetch functions always have the latest value
+  const userLocationRef = useRef(null);
+
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 4000); };
 
-  const loadGoogleScript = useCallback(() => {
-    return new Promise((resolve) => {
-      if (window.google && window.google.maps) { resolve(); return; }
-      const script = document.createElement("script");
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.REACT_APP_GOOGLE_API_KEY}&libraries=places&v=beta`;
-      script.async = true;
-      script.onload = resolve;
-      document.head.appendChild(script);
-    });
-  }, []);
-
-  const mapPlace = useCallback((place, lat, lng, index) => {
-    const trends = ["up", "down", "stable"];
-    const types = place.types || [];
-    const category = getCategory(types);
-    const rating = place.rating || 3.5;
-    const totalRatings = place.userRatingCount || 100;
-    const priceLevel = place.priceLevel || 1;
-    const wait = estimateWait(rating, totalRatings, priceLevel);
-
-    let distMiles = "?";
-    if (place.location) {
-      const placeLat = place.location.lat();
-      const placeLng = place.location.lng();
-      const distMeters = Math.sqrt(
-        Math.pow((placeLat - lat) * 111000, 2) +
-        Math.pow((placeLng - lng) * 111000, 2)
-      );
-      distMiles = (distMeters / 1609).toFixed(1);
-    }
-
-    return {
-      id: place.id,
-      name: place.displayName || "Unknown",
-      category,
-      address: place.formattedAddress || place.vicinity || "",
-      distance: `${distMiles} mi away`,
-      wait,
-      popularity: Math.min(Math.round((wait / 75) * 100), 100),
-      trend: trends[index % 3],
-      rating: place.rating,
-      openNow: place.regularOpeningHours?.isOpen?.() || place.businessStatus === "OPERATIONAL" || false,
-      reports: Math.floor(Math.random() * 30) + 1,
-    };
-  }, []);
-
-  const fetchNearbyPlaces = useCallback(async (lat, lng, category = "All") => {
+  const doFetch = async (lat, lng, category) => {
     const currentFetchId = ++activeFetchId;
     setLoading(true);
     setLocationError(null);
+    setLocations([]);
 
     try {
-      await loadGoogleScript();
+      await loadGoogleScript(process.env.REACT_APP_GOOGLE_API_KEY);
       const { Place } = await window.google.maps.importLibrary("places");
+      const fields = ["id", "displayName", "location", "types", "rating", "userRatingCount",
+                      "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"];
 
-      if (categoryTextQueries[category]) {
-        const { places } = await Place.searchByText({
-          textQuery: categoryTextQueries[category],
-          fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
-                   "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
+      let places = [];
+
+      if (category === "All") {
+        // All: use searchNearby with broad types
+        const result = await Place.searchNearby({
+          fields,
+          locationRestriction: { center: { lat, lng }, radius: 1500 },
+          includedTypes: ["restaurant", "cafe", "store", "hospital", "local_government_office", "supermarket"],
+          maxResultCount: 20,
+        });
+        places = result.places || [];
+      } else if (typeof categoryTypes[category] === "string") {
+        // Text query categories (Grocery)
+        const result = await Place.searchByText({
+          textQuery: categoryTypes[category],
+          fields,
           maxResultCount: 20,
           locationBias: { center: { lat, lng }, radius: 2000 },
         });
-        if (activeFetchId !== currentFetchId) return;
-        if (places && places.length > 0) {
-          setLocations(places.map((p, i) => ({ ...mapPlace(p, lat, lng, i), category: "Grocery" })));
-        } else {
-          setLocationError("No grocery stores found nearby.");
-          setLocations([]);
-        }
-        setLoading(false);
-        return;
+        places = (result.places || []).map(p => ({ ...p, _forcedCategory: category }));
+      } else {
+        // Type-based categories
+        const result = await Place.searchNearby({
+          fields,
+          locationRestriction: { center: { lat, lng }, radius: 1500 },
+          includedTypes: categoryTypes[category] || ["establishment"],
+          maxResultCount: 20,
+        });
+        places = result.places || [];
       }
-
-      const includedTypes = category === "All"
-        ? ["restaurant", "cafe", "store", "hospital", "local_government_office", "grocery_or_supermarket"]
-        : categoryTypes[category] || ["establishment"];
-
-      const { places } = await Place.searchNearby({
-        fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
-                 "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
-        locationRestriction: { center: { lat, lng }, radius: 1500 },
-        includedTypes,
-        maxResultCount: 20,
-      });
 
       if (activeFetchId !== currentFetchId) return;
 
-      if (places && places.length > 0) {
-        setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
+      if (places.length > 0) {
+        setLocations(places.map((p, i) => mapPlaceToLocation(p, lat, lng, i, p._forcedCategory || null)));
       } else {
         setLocationError(`No ${category === "All" ? "places" : category + " places"} found nearby.`);
-        setLocations([]);
       }
     } catch (err) {
       if (activeFetchId !== currentFetchId) return;
-      console.error("fetchNearbyPlaces error:", err);
+      console.error("doFetch error:", err);
       setLocationError("Couldn't load nearby places. Please try again.");
     }
-    setLoading(false);
-  }, [loadGoogleScript, mapPlace]);
 
-  const searchPlacesByName = useCallback(async (query) => {
+    if (activeFetchId === currentFetchId) setLoading(false);
+  };
+
+  const doSearch = async (query) => {
     if (!query.trim()) return;
     const currentFetchId = ++activeFetchId;
     setLoading(true);
     setLocationError(null);
+    setLocations([]);
+
     try {
-      await loadGoogleScript();
+      await loadGoogleScript(process.env.REACT_APP_GOOGLE_API_KEY);
       const { Place } = await window.google.maps.importLibrary("places");
+      const loc = userLocationRef.current;
 
       const { places } = await Place.searchByText({
         textQuery: query,
         fields: ["id", "displayName", "location", "types", "rating", "userRatingCount",
                  "priceLevel", "formattedAddress", "regularOpeningHours", "businessStatus"],
         maxResultCount: 20,
-        ...(userLocation && {
-          locationBias: { center: userLocation, radius: 10000 },
-        }),
+        ...(loc && { locationBias: { center: loc, radius: 10000 } }),
       });
 
       if (activeFetchId !== currentFetchId) return;
 
       if (places && places.length > 0) {
-        const lat = userLocation?.lat || 0;
-        const lng = userLocation?.lng || 0;
-        setLocations(places.map((p, i) => mapPlace(p, lat, lng, i)));
+        const lat = loc?.lat || 0;
+        const lng = loc?.lng || 0;
+        setLocations(places.map((p, i) => mapPlaceToLocation(p, lat, lng, i, null)));
       } else {
         setLocationError(`No results found for "${query}".`);
-        setLocations([]);
       }
     } catch (err) {
       if (activeFetchId !== currentFetchId) return;
-      console.error("searchPlacesByName error:", err);
       setLocationError("Search failed. Please try again.");
     }
-    setLoading(false);
-  }, [loadGoogleScript, mapPlace, userLocation]);
 
-  const handleCategoryChange = (cat) => {
-  setActiveCategory(cat);
-  setSearch("");
-  setLocations([]);
-  setLoading(false);
-  if (userLocation) {
-    fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
-  }
-};
+    if (activeFetchId === currentFetchId) setLoading(false);
+  };
 
+  // Get location on mount
   useEffect(() => {
     if (!navigator.geolocation) {
       setLocationError("Location not supported on this device.");
@@ -382,29 +380,31 @@ export default function Home() {
     }
     navigator.geolocation.getCurrentPosition(
       pos => {
-        const { latitude: lat, longitude: lng } = pos.coords;
-        setUserLocation({ lat, lng });
-        fetchNearbyPlaces(lat, lng, "All");
+        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        userLocationRef.current = loc;
+        setUserLocation(loc);
+        doFetch(loc.lat, loc.lng, "All");
       },
       () => {
         setLocationError("Location access denied. Please enable location to see nearby places.");
         setLoading(false);
       }
     );
-  }, [fetchNearbyPlaces]);
+  }, []); // eslint-disable-line
 
+  // Debounced search
   useEffect(() => {
-    if (!search.trim()) {
-      if (userLocation && locations.length === 0) {
-        fetchNearbyPlaces(userLocation.lat, userLocation.lng, activeCategory);
-      }
-      return;
-    }
-    const timer = setTimeout(() => {
-      searchPlacesByName(search);
-    }, 600);
+    if (!search.trim()) return;
+    const timer = setTimeout(() => doSearch(search), 600);
     return () => clearTimeout(timer);
   }, [search]); // eslint-disable-line
+
+  const handleCategoryChange = (cat) => {
+    setActiveCategory(cat);
+    setSearch("");
+    const loc = userLocationRef.current;
+    if (loc) doFetch(loc.lat, loc.lng, cat);
+  };
 
   const handleSubmit = (range) => {
     const minuteMap = { "Under 5 min":3, "5–15 min":10, "15–30 min":22, "30–60 min":45, "60+ min":70 };
@@ -471,7 +471,11 @@ export default function Home() {
           />
           {search.length > 0 && (
             <button
-              onClick={() => { setSearch(""); if (userLocation) fetchNearbyPlaces(userLocation.lat, userLocation.lng, activeCategory); }}
+              onClick={() => {
+                setSearch("");
+                const loc = userLocationRef.current;
+                if (loc) doFetch(loc.lat, loc.lng, activeCategory);
+              }}
               style={{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", background:"none", border:"none", color:"#555", cursor:"pointer", fontSize:16 }}
             >✕</button>
           )}
@@ -502,7 +506,14 @@ export default function Home() {
               {search ? "No Results" : locationError.includes("denied") ? "Location Required" : "No Places Found"}
             </div>
             <div style={{ fontSize:13, color:"#666", marginBottom:16 }}>{locationError}</div>
-            <button onClick={() => search ? searchPlacesByName(search) : fetchNearbyPlaces(userLocation?.lat, userLocation?.lng, activeCategory)} style={{ background:"#00e5a0", border:"none", borderRadius:10, padding:"10px 20px", color:"#0d1117", fontWeight:700, fontSize:13, cursor:"pointer" }}>Try Again</button>
+            <button
+              onClick={() => {
+                const loc = userLocationRef.current;
+                if (search) doSearch(search);
+                else if (loc) doFetch(loc.lat, loc.lng, activeCategory);
+              }}
+              style={{ background:"#00e5a0", border:"none", borderRadius:10, padding:"10px 20px", color:"#0d1117", fontWeight:700, fontSize:13, cursor:"pointer" }}
+            >Try Again</button>
           </div>
         )}
 
