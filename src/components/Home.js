@@ -392,13 +392,23 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [search]); // eslint-disable-line
 
-  const handleCategoryChange = (cat) => {
-    setActiveCategory(cat);
-    setSearch("");
-    const loc = userLocationRef.current;
-    if (loc) doFetch(loc.lat, loc.lng, cat);
-  };
-
+const handleCategoryChange = (cat) => {
+  setActiveCategory(cat);
+  setSearch("");
+  const loc = userLocationRef.current;
+  if (loc) {
+    doFetch(loc.lat, loc.lng, cat);
+  } else {
+    // Location not ready yet — wait for it then fetch
+    const interval = setInterval(() => {
+      const l = userLocationRef.current;
+      if (l) {
+        clearInterval(interval);
+        doFetch(l.lat, l.lng, cat);
+      }
+    }, 200);
+  }
+};
   const handleSubmit = (range) => {
     const minuteMap = { "Under 5 min":3, "5–15 min":10, "15–30 min":22, "30–60 min":45, "60+ min":70 };
     setLocations(prev => prev.map(l => l.id===reportTarget.id ? {...l, wait:minuteMap[range], reports:l.reports+1} : l));
