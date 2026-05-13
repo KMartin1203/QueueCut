@@ -8,7 +8,7 @@ const iconMap = {
 };
 
 const categoryTypes = {
-  Food: ["restaurant", "cafe", "bar", "bakery", "meal_takeaway", "fast_food_restaurant"],
+  Food: "restaurants cafes bars bakeries near me",
   Government: ["local_government_office", "post_office", "city_hall", "courthouse", "embassy"],
   Retail: ["store", "shopping_mall", "clothing_store", "electronics_store", "department_store"],
   Healthcare: ["hospital", "doctor", "dentist", "physiotherapist", "medical_lab"],
