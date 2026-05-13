@@ -365,13 +365,14 @@ export default function Home() {
   }, [loadGoogleScript, mapPlace, userLocation]);
 
   const handleCategoryChange = (cat) => {
-    setActiveCategory(cat);
-    setSearch("");
-    setLocations([]);
-    if (userLocation) {
-      fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
-    }
-  };
+  setActiveCategory(cat);
+  setSearch("");
+  setLocations([]);
+  setLoading(false);
+  if (userLocation) {
+    fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
+  }
+};
 
   useEffect(() => {
     if (!navigator.geolocation) {
