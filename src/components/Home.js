@@ -364,14 +364,14 @@ export default function Home() {
     setLoading(false);
   }, [loadGoogleScript, mapPlace, userLocation]);
 
-  const handleCategoryChange = useCallback((cat) => {
-    setActiveCategory(cat);
-    setSearch("");
-    setLocations([]);
-    if (userLocation) {
-      fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
-    }
-  }, [userLocation, fetchNearbyPlaces]);
+  const handleCategoryChange = (cat) => {
+  setActiveCategory(cat);
+  setSearch("");
+  setLocations([]);
+  if (userLocation) {
+    fetchNearbyPlaces(userLocation.lat, userLocation.lng, cat);
+  }
+};
 
   useEffect(() => {
     if (!navigator.geolocation) {
